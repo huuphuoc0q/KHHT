@@ -1,0 +1,8 @@
+{
+  "name": "UniPlan - Quản Lý Học Tập & Điểm Tín Chỉ",
+  "description": "Hệ thống quản lý học tập đại học thông minh, tính điểm GPA hệ 4 & hệ 10, dự toán điểm thi cuối kỳ, thời khóa biểu và deadline cho sinh viên.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
