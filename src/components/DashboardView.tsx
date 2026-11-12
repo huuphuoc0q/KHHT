@@ -427,8 +427,11 @@ export const DashboardView: React.FC = () => {
                         backgroundColor: '#0f172a', 
                         borderColor: '#334155', 
                         borderRadius: '10px',
-                        fontSize: '12px' 
+                        fontSize: '12px',
+                        color: '#f8fafc'
                       }}
+                      labelStyle={{ color: '#f8fafc' }}
+                      itemStyle={{ color: '#f8fafc' }}
                       formatter={(val: any) => [`${val} môn`, 'Số lượng']}
                     />
                     <Bar dataKey="count" radius={[6, 6, 0, 0]}>
