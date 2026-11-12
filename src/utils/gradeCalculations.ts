@@ -1,14 +1,14 @@
 import { Course, GradeComponent, GradeScaleConversion } from '../types';
 
 export const STANDARD_GRADE_SCALE: GradeScaleConversion[] = [
-  { letter: 'A+', system4: 4.0, minScore10: 9.0, rankName: 'Xuất sắc', badgeColor: 'bg-emerald-500 text-white' },
-  { letter: 'A', system4: 3.7, minScore10: 8.5, rankName: 'Giỏi', badgeColor: 'bg-emerald-600 text-white' },
-  { letter: 'B+', system4: 3.5, minScore10: 8.0, rankName: 'Khá Giỏi', badgeColor: 'bg-blue-500 text-white' },
+  { letter: 'A', system4: 4.0, minScore10: 8.5, rankName: 'Xuất sắc', badgeColor: 'bg-emerald-600 text-white' },
+  { letter: 'B+', system4: 3.5, minScore10: 7.8, rankName: 'Giỏi', badgeColor: 'bg-blue-500 text-white' },
   { letter: 'B', system4: 3.0, minScore10: 7.0, rankName: 'Khá', badgeColor: 'bg-blue-600 text-white' },
-  { letter: 'C+', system4: 2.5, minScore10: 6.5, rankName: 'Trung bình Khá', badgeColor: 'bg-amber-500 text-white' },
+  { letter: 'C+', system4: 2.5, minScore10: 6.3, rankName: 'Trung bình Khá', badgeColor: 'bg-amber-500 text-white' },
   { letter: 'C', system4: 2.0, minScore10: 5.5, rankName: 'Trung bình', badgeColor: 'bg-amber-600 text-white' },
-  { letter: 'D+', system4: 1.5, minScore10: 5.0, rankName: 'Trung bình Yếu', badgeColor: 'bg-orange-500 text-white' },
+  { letter: 'D+', system4: 1.5, minScore10: 4.8, rankName: 'Trung bình Yếu', badgeColor: 'bg-orange-500 text-white' },
   { letter: 'D', system4: 1.0, minScore10: 4.0, rankName: 'Yếu (Qua môn)', badgeColor: 'bg-orange-600 text-white' },
+  { letter: 'F+', system4: 0.5, minScore10: 3.0, rankName: 'Yếu', badgeColor: 'bg-rose-500 text-white' },
   { letter: 'F', system4: 0.0, minScore10: 0.0, rankName: 'Kém (Học lại)', badgeColor: 'bg-rose-600 text-white' },
 ];
 
@@ -222,15 +222,14 @@ export function solveRequiredComponentScore(
 }
 
 /**
- * Tính toán tất cả các mốc điểm chuẩn (A+, A, B+, B, C+, C, D) cho môn học
+ * Tính toán các mốc điểm chuẩn (A, B+, B, C+, C, D) cho môn học
  */
 export function calculateAllGradeTargets(course: Course, targetComponentId?: string): TargetRequirementResult[] {
   const targets = [
-    { label: 'Điểm A+ (Xuất sắc)', score: 9.0, letter: 'A+', system4: 4.0 },
-    { label: 'Điểm A (Giỏi)', score: 8.5, letter: 'A', system4: 3.7 },
-    { label: 'Điểm B+ (Khá Giỏi)', score: 8.0, letter: 'B+', system4: 3.5 },
+    { label: 'Điểm A (Xuất sắc)', score: 8.5, letter: 'A', system4: 4.0 },
+    { label: 'Điểm B+ (Giỏi)', score: 7.8, letter: 'B+', system4: 3.5 },
     { label: 'Điểm B (Khá)', score: 7.0, letter: 'B', system4: 3.0 },
-    { label: 'Điểm C+ (TB Khá)', score: 6.5, letter: 'C+', system4: 2.5 },
+    { label: 'Điểm C+ (TB Khá)', score: 6.3, letter: 'C+', system4: 2.5 },
     { label: 'Điểm C (Trung bình)', score: 5.5, letter: 'C', system4: 2.0 },
     { label: 'Điểm D (Qua môn)', score: 4.0, letter: 'D', system4: 1.0 },
   ];

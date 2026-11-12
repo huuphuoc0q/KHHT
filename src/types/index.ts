@@ -58,9 +58,9 @@ export interface UserProfile {
 
 // Thang quy đổi điểm chuẩn
 export interface GradeScaleConversion {
-  letter: string;      // A+, A, B+, B, C+, C, D+, D, F
-  system4: number;     // 4.0, 3.7, 3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0
-  minScore10: number;  // 9.0, 8.5, 8.0, 7.0, 6.5, 5.5, 5.0, 4.0, 0
+  letter: string;      // A, B+, B, C+, C, D+, D, F+, F
+  system4: number;     // 4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5, 0
+  minScore10: number;  // 8.5, 7.8, 7.0, 6.3, 5.5, 4.8, 4.0, 3.0, 0
   rankName: string;    // Xuất sắc, Giỏi, Khá, Trung bình, Yếu, Kém
   badgeColor: string;
 }
