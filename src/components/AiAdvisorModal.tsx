@@ -15,57 +15,84 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { useUniPlanStore } from '../store/useUniPlanStore';
-import { calculateGPA, calculateCourseGrade, getComponentScore, convertScoreToGrade } from '../utils/gradeCalculations';
+import { calculateGPA, calculateCourseGrade, convertScoreToGrade } from '../utils/gradeCalculations';
 
 interface AiAdvisorModalProps {
   onClose: () => void;
   onOpenCalculatorForCourse: (courseId: string) => void;
 }
 
+// Hàm chuẩn hóa chuỗi tiếng Việt
+const normalizeString = (str: string) => {
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+};
+
 export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({ onClose, onOpenCalculatorForCourse }) => {
-  const { courses, userProfile, activeSemesterId } = useUniPlanStore();
+  const { courses, tasks, userProfile, activeSemesterId } = useUniPlanStore();
 
   const [customQuestion, setCustomQuestion] = useState('');
   const [messages, setMessages] = useState<Array<{ sender: 'ai' | 'user'; text: string; time: string }>>([
     {
       sender: 'ai',
-      text: `Chào ${userProfile.studentName || 'bạn'}! Tôi là UniPlan AI - Cố vấn học tập tín chỉ của bạn. Tôi đã phân tích toàn bộ bảng điểm, tín chỉ và các môn đang học của bạn. Bạn muốn tư vấn về chiến lược thi cử, phân bổ thời gian ôn tập hay cách đạt bằng ${userProfile.targetCumulativeGpa4 >= 3.6 ? 'Xuất Sắc' : 'Giỏi'}?`,
+      text: `Chào ${userProfile.studentName || 'bạn'}! Tôi là UniPlan AI - Cố vấn học tập tín chỉ của bạn.\nTôi đã phân tích toàn bộ ${courses.length} học phần và danh sách công việc của bạn.\nBạn muốn tính điểm thi cần đạt, kiểm tra deadline khẩn cấp, mô phỏng điểm số hay gợi ý học cải thiện?`,
       time: 'Vừa xong',
     },
   ]);
   const [isThinking, setIsThinking] = useState(false);
 
-  // 1. Phân tích điểm
-  const overall = calculateGPA(courses);
-  const inProgressCourses = courses.filter(c => c.status === 'in-progress');
+  // 1. Phân tích điểm cơ bản (Loại trừ môn điều kiện MILI, PHYL)
+  const gpaCourses = courses.filter(c => !c.code.toUpperCase().startsWith('MILI') && !c.code.toUpperCase().startsWith('PHYL'));
+  const overall = calculateGPA(courses); 
+  const inProgressCourses = courses.filter(c => c.status === 'in-progress' && !c.code.toUpperCase().startsWith('MILI') && !c.code.toUpperCase().startsWith('PHYL'));
+  const currentTotalCredits = overall.totalEarnedCredits;
 
   // 2. Môn gánh team (top điểm cao)
-  const topCourses = [...courses]
+  const topCourses = [...gpaCourses]
     .filter(c => c.status === 'completed')
-    .sort((a, b) => {
-      const gA = calculateCourseGrade(a).finalScore10 || 0;
-      const gB = calculateCourseGrade(b).finalScore10 || 0;
-      return gB - gA;
-    })
+    .sort((a, b) => (calculateCourseGrade(b).finalScore10 || 0) - (calculateCourseGrade(a).finalScore10 || 0))
     .slice(0, 3);
 
-  // 3. Môn kéo điểm (cần chú ý / học cải thiện)
-  const weakCourses = [...courses]
-    .filter(c => c.status === 'completed')
-    .filter(c => {
-      const g = calculateCourseGrade(c).finalScore10;
-      return g !== null && g < 7.5;
-    })
-    .slice(0, 3);
+  // 3. Môn kéo điểm và Delta GPA (Hàm an toàn lấy điểm hệ 4)
+  const getGrade4 = (score: number) => {
+    const converted = convertScoreToGrade(score) as any;
+    if (typeof converted === 'number') return converted;
+    if (converted && typeof converted.system4 === 'number') return converted.system4;
+    if (converted && typeof converted.gpa4 === 'number') return converted.gpa4;
+    if (score >= 8.5) return 4.0;
+    if (score >= 7.8) return 3.5;
+    if (score >= 7.0) return 3.0;
+    if (score >= 6.3) return 2.5;
+    if (score >= 5.5) return 2.0;
+    if (score >= 4.0) return 1.0;
+    return 0.0;
+  };
 
-  // 4. Ma trận ưu tiên ôn thi: Priority = Credits * ExamWeight
+  const improvementCourses = [...gpaCourses]
+    .filter(c => c.status === 'completed')
+    .map(c => {
+      const g = calculateCourseGrade(c);
+      const score10 = g.finalScore10;
+      if (score10 === null) return null;
+      
+      const currentGrade4 = getGrade4(score10);
+      if (currentGrade4 >= 3.0) return null;
+
+      const potentialGainPoints = (4.0 - currentGrade4) * c.credits;
+      const deltaGpa = currentTotalCredits > 0 ? (potentialGainPoints / currentTotalCredits) : 0;
+
+      return { course: c, score10, currentGrade4, deltaGpa };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b?.deltaGpa || 0) - (a?.deltaGpa || 0));
+
+  // 4. Ma trận ưu tiên ôn thi
   const studyPriorities = inProgressCourses.map(c => {
     const finalComp = c.gradeComponents.find(comp => /cuối|final|thi/i.test(comp.name)) 
       || c.gradeComponents[c.gradeComponents.length - 1];
     const examWeight = finalComp ? finalComp.weight : 50;
-    const priorityScore = c.credits * examWeight;
+    let priorityScore = c.credits * examWeight;
     const grade = calculateCourseGrade(c);
-
+    
     return {
       course: c,
       finalCompName: finalComp?.name || 'Thi Cuối kỳ',
@@ -77,7 +104,7 @@ export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({ onClose, onOpenC
 
   const totalPrioritySum = studyPriorities.reduce((sum, item) => sum + item.priorityScore, 0);
 
-  // Xử lý gửi câu hỏi tư vấn AI
+  // ---------- BỘ MÁY XỬ LÝ LÝ LUẬN CỐ VẤN ----------
   const handleSendMessage = async (textToSend?: string) => {
     const query = textToSend || customQuestion;
     if (!query.trim()) return;
@@ -91,36 +118,113 @@ export const AiAdvisorModal: React.FC<AiAdvisorModalProps> = ({ onClose, onOpenC
     if (!textToSend) setCustomQuestion('');
     setIsThinking(true);
 
-    // AI Academic Reasoning Generator
     setTimeout(() => {
       let response = '';
+      const normalizedQuery = normalizeString(query);
 
-      if (/xuất sắc|giỏi|mục tiêu|bằng/i.test(query)) {
-        response = `🎯 **Chiến lược giữ vững Bằng ${userProfile.targetCumulativeGpa4 >= 3.6 ? 'Xuất Sắc (GPA ≥ 3.6)' : 'Giỏi (GPA ≥ 3.2)'}**:
-- Hiện tại GPA của bạn là **${overall.gpa4.toFixed(2)}/4.00** (${overall.honor.title.split(' ')[0]}).
-- Để giữ vững hoặc chạm tới mục tiêu **${userProfile.targetCumulativeGpa4.toFixed(2)}**, trong học kỳ này bạn cần duy trì tối thiểu **${Math.max(3.2, userProfile.targetCumulativeGpa4).toFixed(2)}**.
-- Trong ${inProgressCourses.length} môn đang học, hãy đặc biệt dồn sức vào các môn 3-4 tín chỉ (${inProgressCourses.map(c => c.code).join(', ')}). Một điểm A ở môn 4 tín chỉ có giá trị kéo GPA gấp đôi môn 2 tín chỉ!`;
-      } else if (/ôn thi|phân bổ|thời gian|lịch/i.test(query)) {
-        response = `📚 **Phân bổ thời gian ôn thi dựa trên trọng số tín chỉ**:
+      // A. KIỂM TRA TÍNH NĂNG NHẮC DEADLINE KHẨN CẤP
+      if (normalizedQuery.includes("deadline") || normalizedQuery.includes("bai tap") || normalizedQuery.includes("nhac viec") || normalizedQuery.includes("can lam")) {
+        const activeTasks = tasks.filter(t => t.status !== 'done');
+        if (activeTasks.length === 0) {
+          response = `🎉 **Tuyệt vời!** Không có deadline nào đang chờ xử lý. Bạn đang quản lý thời gian học tập rất tốt!`;
+        } else {
+          response = `⚠️ **Danh sách công việc & Deadline cần chú ý**:
+${activeTasks.map((task, idx) => {
+  const matchedCourse = courses.find(c => c.id === task.courseId);
+  return `**${idx + 1}. [${matchedCourse ? matchedCourse.code : 'Chung'}] ${task.title}**\n   - Hạn nộp: ${task.dueDate} | Ưu tiên: ${task.priority.toUpperCase()}`;
+}).join('\n\n')}
+💡 *Lời khuyên*: Hãy giải quyết các nhiệm vụ ưu tiên cao trước để giải tỏa tâm lý trước kỳ thi!`;
+        }
+      } 
+      // B. KIỂM TRA MÃ MÔN CỤ THỂ KÈM TÍNH NGƯỢC ĐIỂM THI (REVERSE ENGINEERING)
+      else {
+        const mentionedCourse = courses.find(c => normalizedQuery.includes(c.code.toLowerCase()) || normalizedQuery.includes(normalizeString(c.name)));
+        if (mentionedCourse) {
+          const cGrade = calculateCourseGrade(mentionedCourse);
+          const target = mentionedCourse.targetGradeSystem10 || 8.5;
+          const currentAvg = cGrade.currentAverage10; // Điểm quá trình tích lũy hiện tại (trước khi tính thi cuối kỳ)
+          
+          // Tìm cột thi cuối kỳ
+          const finalComp = mentionedCourse.gradeComponents.find(comp => /cuối|final|thi/i.test(comp.name)) 
+            || mentionedCourse.gradeComponents[mentionedCourse.gradeComponents.length - 1];
+          const weightFinal = finalComp ? finalComp.weight / 100 : 0.6; // Mặc định 60% nếu không tìm thấy
+          const weightProcess = 1 - weightFinal;
+
+          let calculationText = '';
+          if (currentAvg !== null && currentAvg > 0) {
+            // Công thức: Target = Process * weightProcess + Final * weightFinal
+            // => Final = (Target - Process * weightProcess) / weightFinal
+            const requiredFinal = (target - (currentAvg * weightProcess)) / weightFinal;
+            const clampedFinal = Math.max(0, Math.min(10, Math.round(requiredFinal * 100) / 100));
+            
+            calculationText = `\n- Điểm quá trình hiện tại: **${currentAvg.toFixed(2)}** (chiếm ${Math.round(weightProcess * 100)}%).
+- Mục tiêu điểm tổng kết: **${target} (${convertScoreToGrade(target).letter})**.
+- 🎯 **Nhiệm vụ thi cuối kỳ**: Bạn cần đạt tối thiểu **${clampedFinal}/10** ở bài thi cuối kỳ (${Math.round(weightFinal * 100)}% trọng số) để chạm mục tiêu!`;
+          } else {
+            calculationText = `\n💡 Môn này bạn chưa nhập điểm quá trình. Hãy vào tab "Dự toán Điểm thi" để nhập các cột điểm thành phần và tính chính xác số điểm cần đạt nhé!`;
+          }
+
+          response = `📚 **Phân tích chiến lược môn ${mentionedCourse.code} - ${mentionedCourse.name}**:
+- Số tín chỉ: **${mentionedCourse.credits} TC**.
+- Tình trạng: ${mentionedCourse.status === 'completed' ? `Đã hoàn thành với điểm tổng kết ${cGrade.finalScore10?.toFixed(1)}.` : 'Đang học.'}${calculationText}`;
+        } 
+        // C. KỊCH BẢN: "HỌC CẢI THIỆN"
+        else if (normalizedQuery.includes("cai thien") || normalizedQuery.includes("hoc lai") || normalizedQuery.includes("keo diem")) {
+          if (improvementCourses.length > 0) {
+            response = `🔄 **Chẩn đoán các môn học cải thiện sinh lời GPA cao nhất**:
+Hiện tại bạn có ${improvementCourses.length} môn dưới điểm B. Nếu bạn đăng ký học lại và đạt điểm A, đây là mức tăng GPA thực tế bạn sẽ nhận được:
+${improvementCourses.slice(0, 3).map((item, idx) => 
+  `**${idx + 1}. ${item!.course.code} (${item!.course.credits} TC)**: Điểm cũ ${item!.score10.toFixed(1)} -> Kéo tổng GPA toàn khóa tăng **+${item!.deltaGpa.toFixed(3)} điểm**.`
+).join('\n')}
+
+💡 *Tư vấn*: Hãy ưu tiên môn **${improvementCourses[0]!.course.code}** vì nó mang lại sức bật lớn nhất cho GPA chung của bạn!`;
+          } else {
+            response = `🎉 Chúc mừng! Bảng điểm của bạn rất vững chắc. Tất cả các môn tính GPA đều đang ở mức Khá Giỏi trở lên, không có môn nào dưới B (3.0) đáng để bỏ thời gian học cải thiện lúc này.`;
+          }
+        } 
+        // D. KỊCH BẢN "MÔ PHỎNG ĐIỂM (WHAT-IF)"
+        else if (normalizedQuery.includes("gia dinh") || normalizedQuery.includes("ky nay") || normalizedQuery.includes("mo phong")) {
+          const inProgCredits = inProgressCourses.reduce((sum, c) => sum + c.credits, 0);
+          if (inProgCredits === 0) {
+            response = `Hiện tại bạn không có môn học nào đang diễn ra để mô phỏng điểm số kỳ này.`;
+          } else {
+            const currentTotalPts = overall.gpa4 * currentTotalCredits;
+            const newTotalCredits = currentTotalCredits + inProgCredits;
+            const simBPlusGpa = (currentTotalPts + (inProgCredits * 3.5)) / newTotalCredits;
+            const simAGpa = (currentTotalPts + (inProgCredits * 4.0)) / newTotalCredits;
+
+            response = `🔮 **Mô phỏng "What-if" cho học kỳ hiện tại**:
+Bạn đang có **${inProgCredits} TC** tính điểm kỳ này.
+- Hiện tại GPA tích lũy: **${overall.gpa4.toFixed(2)}** (Hệ 4).
+- Nếu kỳ này các môn đều đạt Khá Giỏi (B+ / 3.5): GPA tích lũy sẽ là **${simBPlusGpa.toFixed(2)}**.
+- Nếu kỳ này bạn bứt phá đạt toàn A (4.0): GPA tích lũy sẽ nhảy vọt lên **${simAGpa.toFixed(2)}**!
+💪 Hãy cố gắng cày cuốc các bài tập nhóm và giữa kỳ để tạo đà nhé!`;
+          }
+        }
+        // E. KỊCH BẢN: PHÂN BỔ THỜI GIAN
+        else if (normalizedQuery.includes("on thi") || normalizedQuery.includes("phan bo") || normalizedQuery.includes("thoi gian")) {
+          if (studyPriorities.length === 0) {
+            response = `Bạn hiện không có môn nào đang học cần ôn thi. Hãy kiểm tra lại danh sách môn học của kỳ này.`;
+          } else {
+            response = `📚 **Bảng phân bổ thời gian ôn thi dựa trên trọng số & tín chỉ**:
 ${studyPriorities.map((item, idx) => {
-  const percent = totalPrioritySum > 0 ? Math.round((item.priorityScore / totalPrioritySum) * 100) : 25;
-  return `• **Ưu tiên ${idx + 1}**: ${item.course.code} - ${item.course.name} (${item.course.credits} TC, thi ${item.examWeight}%): dành **${percent}%** quỹ thời gian ôn tập.`;
+  const percent = totalPrioritySum > 0 ? Math.round((item.priorityScore / totalPrioritySum) * 100) : 0;
+  return `• **Ưu tiên ${idx + 1}**: ${item.course.code} (${item.course.credits} TC, thi ${item.examWeight}%): dành **${percent}%** quỹ giờ.`;
 }).join('\n')}
 
-💡 *Chiến thuật*: Hãy làm trước các đề thi mẫu của các năm trước và nắm vững các bài lab/bài tập lớn vì chúng chiếm 50% trọng số đề thi cuối kỳ.`;
-      } else if (/cải thiện|học lại|kéo điểm/i.test(query)) {
-        if (weakCourses.length > 0) {
-          response = `🔄 **Gợi ý môn học cải thiện hiệu quả nhất**:
-Bạn có các môn: ${weakCourses.map(c => `${c.code} (${calculateCourseGrade(c).finalScore10?.toFixed(1)})`).join(', ')}.
-Nếu đăng ký học cải thiện 1 trong các môn này trong kỳ hè hoặc kỳ tới và nâng lên điểm A (8.5), GPA toàn khóa của bạn sẽ tăng ngay lập tức khoảng **+0.05 đến +0.10 điểm**!`;
-        } else {
-          response = `🎉 Bảng điểm của bạn rất đẹp! Hầu hết các môn đều đạt loại Khá Giỏi trở lên, không có môn nào dưới 7.0 cần học cải thiện gấp.`;
+💡 *Chiến thuật*: Trọng số thi cuối kỳ của các môn này khá cao. Bạn nên lập kế hoạch ôn sớm cho **${studyPriorities[0].course.code}** ngay từ tuần này.`;
+          }
         }
-      } else {
-        response = `💡 **Phân tích học tập cho ${userProfile.studentName || 'bạn'}**:
-- Tổng số tín chỉ đã hoàn thành: **${overall.totalEarnedCredits}/${userProfile.totalRequiredCredits} TC** (${Math.round((overall.totalEarnedCredits / userProfile.totalRequiredCredits) * 100)}%).
-- Điểm quá trình kỳ này của bạn đang ở mức rất tốt (${studyPriorities[0]?.course.code || 'Môn học'}: TB ${studyPriorities[0]?.currentAvg?.toFixed(1) || '8.5'}).
-- Bấm vào tab **"Dự toán Điểm thi"** ở thanh trên để xem chính xác điểm thi tối thiểu cần đạt cho từng môn nhé!`;
+        // F. KỊCH BẢN MẶC ĐỊNH
+        else {
+          response = `💡 **Cố vấn học tập UniPlan phản hồi**:
+Với **${overall.gpa4.toFixed(2)}/4.00** điểm tích lũy hiện có, bạn đang giữ phong độ rất tốt.
+Bạn có thể hỏi tôi các câu như:
+- *"Kiểm tra deadline khẩn cấp giúp tôi"*
+- *"Môn COMP1016 cần thi mấy điểm để đạt mục tiêu?"*
+- *"Có môn nào đáng để học cải thiện không?"*
+- Hoặc gõ trực tiếp **mã môn học** để xem phân tích chi tiết!`;
+        }
       }
 
       setMessages(prev => [
@@ -132,7 +236,7 @@ Nếu đăng ký học cải thiện 1 trong các môn này trong kỳ hè hoặ
         },
       ]);
       setIsThinking(false);
-    }, 700);
+    }, 600);
   };
 
   return (
@@ -147,13 +251,13 @@ Nếu đăng ký học cải thiện 1 trong các môn này trong kỳ hè hoặ
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h2 className="text-base font-bold text-white">UniPlan AI Academic Advisor</h2>
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  AI Cố Vấn
+                <h2 className="text-base font-bold text-white">UniPlan Academic Advisor</h2>
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Phân Tích Dữ Liệu
                 </span>
               </div>
               <p className="text-xs text-slate-300">
-                Chẩn đoán học bạ, tối ưu hóa điểm số và chiến lược học tập đại học
+                Chẩn đoán học bạ bằng thuật toán và tối ưu hóa chiến lược
               </p>
             </div>
           </div>
@@ -203,7 +307,7 @@ Nếu đăng ký học cải thiện 1 trong các môn này trong kỳ hè hoặ
               </span>
 
               <div className="space-y-2">
-                {studyPriorities.map((item, index) => {
+                {studyPriorities.slice(0, 4).map((item, index) => {
                   const percent = totalPrioritySum > 0 ? Math.round((item.priorityScore / totalPrioritySum) * 100) : 25;
                   return (
                     <div 
@@ -252,7 +356,7 @@ Nếu đăng ký học cải thiện 1 trong các môn này trong kỳ hè hoặ
                     <div key={c.id} className="flex justify-between items-center text-[11px]">
                       <span className="truncate pr-2">{c.code} - {c.name}</span>
                       <strong className="text-emerald-400 font-mono">
-                        {calculateCourseGrade(c).finalScore10?.toFixed(1)} (A)
+                        {calculateCourseGrade(c).finalScore10?.toFixed(1)} 
                       </strong>
                     </div>
                   ))}
@@ -262,16 +366,16 @@ Nếu đăng ký học cải thiện 1 trong các môn này trong kỳ hè hoặ
 
           </div>
 
-          {/* Right Column: AI Chat Counselor (7 cols) */}
+          {/* Right Column: Rule-based Chat Counselor (7 cols) */}
           <div className="lg:col-span-7 flex flex-col h-[520px] bg-slate-900">
             
             {/* Quick Suggestion Chips */}
             <div className="p-3 border-b border-slate-800 bg-slate-900/80 flex items-center space-x-1.5 overflow-x-auto no-scrollbar">
               <span className="text-[10px] text-slate-400 uppercase font-bold flex-shrink-0">Gợi ý:</span>
               {[
-                'Làm sao để giữ bằng Xuất Sắc kỳ này?',
-                'Phân bổ thời gian ôn thi tối ưu?',
-                'Có nên học cải thiện môn nào không?',
+                'Kiểm tra deadline khẩn cấp',
+                'Mô phỏng điểm học kỳ này',
+                'COMP1016 cần thi mấy điểm?',
               ].map(prompt => (
                 <button
                   key={prompt}
@@ -311,7 +415,7 @@ Nếu đăng ký học cải thiện 1 trong các môn này trong kỳ hè hoặ
                 <div className="flex justify-start">
                   <div className="bg-slate-800 border border-slate-700 text-slate-300 rounded-2xl rounded-tl-sm p-3 text-xs flex items-center space-x-2">
                     <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin" />
-                    <span>UniPlan AI đang phân tích dữ liệu bảng điểm...</span>
+                    <span>Đang chẩn đoán dữ liệu bảng điểm & deadline...</span>
                   </div>
                 </div>
               )}
@@ -328,7 +432,7 @@ Nếu đăng ký học cải thiện 1 trong các môn này trong kỳ hè hoặ
               >
                 <input
                   type="text"
-                  placeholder="Hỏi AI về chiến lược ôn thi, cách gỡ điểm môn học..."
+                  placeholder="Gõ mã môn (COMP1016), hoặc hỏi về deadline..."
                   value={customQuestion}
                   onChange={(e) => setCustomQuestion(e.target.value)}
                   className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"

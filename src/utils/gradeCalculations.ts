@@ -35,6 +35,11 @@ export function getComponentScore(component: GradeComponent): number | null {
  * - enteredWeight: trọng số các cột đã có điểm
  * - isFullyGraded: đã có điểm đầy đủ hay chưa
  */
+// Các học phần điều kiện (GDQP, GDTC) không tính vào GPA và 130 TC tích lũy
+export const isConditionalCourse = (code: string): boolean => {
+  const normalized = code.trim().toUpperCase();
+  return normalized.startsWith('MILI') || normalized.startsWith('PHYL');
+};
 export function calculateCourseGrade(course: Course) {
   let accumulatedWeightedScore = 0;
   let enteredWeight = 0;
@@ -110,12 +115,13 @@ export function getGraduationHonor(gpa4: number): { title: string; color: string
  * Tính GPA cho một danh sách môn học (cho cả học kỳ hoặc toàn khóa)
  */
 export function calculateGPA(courses: Course[]) {
+  const gpaCourses = courses.filter((c) => !isConditionalCourse(c.code));
   let totalCredits = 0;
   let totalEarnedCredits = 0;
   let weightedScore10Sum = 0;
   let weightedScore4Sum = 0;
 
-  courses.forEach(course => {
+  gpaCourses.forEach(course => {
     // Chỉ tính các môn đã có điểm hoặc đang tính (nếu tính dự đoán)
     const { finalScore10, currentAverage10, isFullyGraded } = calculateCourseGrade(course);
     const score10ToUse = finalScore10 ?? (course.status === 'in-progress' ? currentAverage10 : null);
